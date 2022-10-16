@@ -53,7 +53,6 @@ def get_recipients():
         if 'phone' in c and c['phone']:
             clean_number = c["phone"].replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
             contacts_by_id[c['_id']] = {'phone': clean_number, 'name': c['system_display_name']}
-
     return contacts_by_id
 
 
@@ -82,16 +81,23 @@ def xml_create_sms(root, row):
     sms.setAttribute('status', '-1')
 
     try:
-        sms.setAttribute('address', ADDRESSES[row["address"]]['phone'])
-        sms.setAttribute('contact_name', ADDRESSES[row["address"]]['name'])
+        phone = ADDRESSES[row["address"]]['phone']
+        name = ADDRESSES[row["address"]]['name']
     except KeyError:
-        logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, sms looks like: {row}')
-        sys.exit(1)
+        try:
+            phone = GROUPS[row["address"]][0]['phone']
+            name = GROUPS[row["address"]][0]['name']
+        except (KeyError, IndexError):
+            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, sms looks like: {row}')
+            sys.exit(1)
+
+    sms.setAttribute('address', phone)
+    sms.setAttribute('contact_name ', name)
 
     try:
-        t = TYPES[row['type']]
+        t = TYPES[int(row['type'])]
     except KeyError:
-        t = 2  # default to received
+        t = 1  # default to received
     sms.setAttribute('type', str(t))
     sms.setAttribute('body', str(row['body']))
     return sms
@@ -103,9 +109,9 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('ct_t', "application/vnd.wap.multipart.related")
 
     try:
-        t = TYPES[row['msg_box']]
+        t = TYPES[int(row['msg_box'])]
     except KeyError:
-        t = 2  # default to received
+        t = 1  # default to received
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
     mms.setAttribute('sub', 'null')
@@ -201,11 +207,11 @@ cursor = conn.cursor()
 cursor2 = conn.cursor()
 
 TYPES = {
-    23: 1,        # sent
-    87: 1,        # sent
-    10485780: 1,  # sent
-    20: 2,        # received
-    10485783: 2,  # received
+    23:          2,  # me sent
+    87:          2,  # me sent
+    10485783:    2,  # me sent
+    10485780:    1,  # received
+    20:          1,  # received
 }
 
 ADDRESSES = get_recipients()
