@@ -220,14 +220,18 @@ root = minidom.Document()
 smses = root.createElement('smses')
 root.appendChild(smses)
 
+counter = 0
+
 cursor.execute('select * from sms order by date_sent')
 for row in cursor.fetchall():
+    counter += 1
     row = dict(row)
     logging.info(f'sms processing: {row["_id"]}')
     smses.appendChild(xml_create_sms(root, row))
 
 cursor.execute('select * from mms order by date')
 for row in cursor.fetchall():
+    counter += 1
     row = dict(row)
     logging.info(f'mms processing: {row["_id"]}')
 
@@ -243,6 +247,10 @@ for row in cursor.fetchall():
         addrs.append(ADDRESSES[row['address']])
 
     smses.appendChild(xml_create_mms(root, row, parts, addrs))
+
+
+# update the total count
+smses.setAttribute("count", str(counter))
 
 # xml_str = root.toprettyxml(indent="\t")
 with open("sms-backup-restore.xml", "w") as f:
