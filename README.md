@@ -6,9 +6,6 @@ XML file that can be used with SyncTech's *SMS Backup & Restore* Android app.
 This project will export all SMS + MMS + Signal messages, so that all the
 messages can be re-imported into the Android messaging store.
 
-This project came about because of Signal's decision to drop SMS support out of
-Signal - to aid in this they provided an "Export SMS" facility, unfortunately
-it exports SMS only, and skips past MMS and also Signal messages.
 
 ## Caveats
 
