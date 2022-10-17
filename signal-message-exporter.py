@@ -1,4 +1,3 @@
-from codecs import ignore_errors
 import os
 import sys
 import sqlite3
