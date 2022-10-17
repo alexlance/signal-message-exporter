@@ -318,5 +318,4 @@ logging.info("Complete.")
 logging.info("Created: sms-backup-restore.xml")
 logging.info("Now install SMS Backup & Restore and choose this file to restore")
 if int(sms_errors + mms_errors) > 0:
-
     logging.error(f"WARNING: {sms_errors + mms_errors} messages were skipped! I.e. Not all messages were exported successfully. See output above for the messages that were skipped")
