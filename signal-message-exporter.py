@@ -43,7 +43,7 @@ def print_num_signal_mms():
     q = "select count(*) as tally from mms where msg_box in (10485780, 10485783)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
-    logging.info(f"Total number Signal Multimedia messages: {tally}")
+    logging.info(f"Total number Signal media messages: {tally}")
 
 
 def get_recipients():
@@ -66,7 +66,10 @@ def get_groups():
             for member_recipient_id in g['members'].split(','):
                 if g['recipient_id'] not in groups_by_id:
                     groups_by_id[g['recipient_id']] = []
-                groups_by_id[g['recipient_id']].append(ADDRESSES[int(member_recipient_id)])
+                try:
+                    groups_by_id[g['recipient_id']].append(ADDRESSES[int(member_recipient_id)])
+                except KeyError:
+                    logging.info(f"Unable to find a contact on your phone with ID: {member_recipient_id}")
     return groups_by_id
 
 
@@ -90,7 +93,6 @@ def xml_create_sms(root, row):
             name = GROUPS[row["address"]][0]['name']
         except (KeyError, IndexError):
             logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, sms looks like: {row}')
-            #sys.exit(1)
 
     sms.setAttribute('address', phone)
     sms.setAttribute('contact_name ', name)
@@ -127,7 +129,6 @@ def xml_create_mms(root, row, parts, addrs):
             name = GROUPS[row["address"]][0]['name']
         except (KeyError, IndexError):
             logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, mms looks like: {row}')
-            #sys.exit(1)
 
     mms.setAttribute('address', phone)
     mms.setAttribute('contact_name ', name)
@@ -166,8 +167,8 @@ def xml_create_mms_part(root, row):
             b = base64.b64encode(f.read())
             base64_encoded_file_data = str(b.decode())
     except FileNotFoundError:
-        logging.error(f'Exiting: file not found: {filename} for part: {row}')
-        sys.exit(1)
+        logging.error(f'File not found for media message: {filename} for part: {row}')
+        raise
 
     part.setAttribute("data", base64_encoded_file_data)
     return part
@@ -180,11 +181,11 @@ def xml_create_mms_addr(root, address, address_type):
     addr.setAttribute("charset", "UTF-8")  # todo
     return addr
 
+
 def is_tool(name):
     """Check whether `name` is on PATH and marked as executable."""
     # from whichcraft import which
     return which(name) is not None
-
 
 
 parser = argparse.ArgumentParser(description='Export Signal messages to an XML file compatible with SMS Backup & Restore')
@@ -192,14 +193,13 @@ parser = argparse.ArgumentParser(description='Export Signal messages to an XML f
 # parser.add_argument('--mode', '-m', dest='mode', action='store', help="mode should be one sms-only, sms-mms-only, sms-mms-signal")
 parser.add_argument('--verbose', '-v', dest='verbose', action='store_true', help='Make logging more verbose')
 args = parser.parse_args()
-#
-logging.basicConfig(filename='signalsmsmmsexport.log', filemode='a',format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG if args.verbose else logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG if args.verbose else logging.INFO)
 
 PLATFORM = sys.platform
 
 if PLATFORM == 'win32':
     BKP_TOOL = 'signalbackup-tools'
-elif PLATFORM in['linux', 'linux2']:
+elif PLATFORM in ['linux', 'linux2']:
     BKP_TOOL = '/usr/bin/signalbackup-tools'
 else:
     BKP_TOOL = None
@@ -207,37 +207,28 @@ else:
 if not is_tool(BKP_TOOL):
     BKP_TOOL = input(r'Could not find signalbackup-tools, please input full path to executable: ')
 
-SIG_KEY = os.environ.get("SIG_KEY",'')
-SIG_FILE = os.environ.get("SIG_FILE",'')
+SIG_KEY = os.environ.get("SIG_KEY", '')
+SIG_FILE = os.environ.get("SIG_FILE", '')
 
 if not os.environ.get("SIG_KEY"):
-    #logging.error("Missing environment variable SIG_KEY, try eg: export SIG_KEY=123456789101112131415161718192")
-    #sys.exit(1)
     SIG_KEY = input("Could not find SIG_KEY environment variable, please input here: ")
 if not os.environ.get("SIG_FILE"):
-    #logging.error("Missing environment variable SIG_FILE, try eg: export SIG_FILE=signal-2022-01-01-01-01-01.backup")
-    ##sys.exit(1)
     SIG_FILE = input(r"Could not find SIG_FILE environment variable, please input full path to Signal backupfile here: ")
 
-# if not os.path.exists('bits/'):
-#run_cmd("mkdir -p bits")
-logging.info('recreating empty bits dir')
-rmtree('bits', ignore_errors = True)
-os.makedirs('bits',exist_ok=True)
-#run_cmd("rm -f sms-backup-restore.xml")
-logging.info('removing sms-backup-restore.xml')
+logging.info('Recreating temporary export dir')
+rmtree('bits', ignore_errors=True)
+os.makedirs('bits', exist_ok=True)
 try:
     os.remove('sms-backup-restore.xml')
+    logging.info('Removed existing sms-backup-restore.xml')
 except FileNotFoundError:
-    logging.info('no sms-backup-restore.xml to delete')
+    pass
 
-logging.info('starting signalbackup-tools now')
-
+logging.info('Starting signalbackup-tools')
 run_cmd(f'{BKP_TOOL} --input {SIG_FILE} --output bits/ --password {SIG_KEY} --no-showprogress')
+logging.info('Finished signalbackup-tools')
+logging.info('Parsing the sqlite database bits/database.sqlite')
 
-logging.info('finished signalbackup-tools')
-
-logging.info('parsing the sqlite database')
 # parse the sqlite database generated by github.com/bepaald/signalbackup-tools
 conn = sqlite3.connect(os.path.join("bits", "database.sqlite"))
 conn.row_factory = sqlite3.Row
@@ -264,29 +255,33 @@ root = minidom.Document()
 smses = root.createElement('smses')
 root.appendChild(smses)
 
-counter = 0
+sms_counter = 0
+sms_errors = 0
+mms_counter = 0
+mms_errors = 0
 
-logging.info('starting sms extract')
+logging.info('Starting SMS and Signal text message export')
 
 cursor.execute('select * from sms order by date_sent')
 for row in cursor.fetchall():
-    counter += 1
+    sms_counter += 1
     row = dict(row)
-    logging.debug(f'sms processing: {row["_id"]}')
+    logging.debug(f'SMS processing: {row["_id"]}')
     try:
         smses.appendChild(xml_create_sms(root, row))
-    except Exception:
+    except Exception as e:
+        logging.error(f"Failed to export this text message: {row} because {e}")
+        sms_errors += 1
         continue
 
-logging.info('finished sms extract')
-
-logging.info('starting mms extract')
+logging.info(f'Finished text message export. Messages exported: {sms_counter} Errors: {sms_errors}')
+logging.info('Starting MMS and Signal media message export')
 
 cursor.execute('select * from mms order by date')
 for row in cursor.fetchall():
-    counter += 1
+    mms_counter += 1
     row = dict(row)
-    logging.debug(f'mms processing: {row["_id"]}')
+    logging.debug(f'MMS processing: {row["_id"]}')
 
     parts = []
     cursor2.execute(f'select * from part where mid = {row["_id"]} order by seq')
@@ -301,13 +296,15 @@ for row in cursor.fetchall():
 
     try:
         smses.appendChild(xml_create_mms(root, row, parts, addrs))
-    except Exception:
+    except Exception as e:
+        logging.error(f"Failed to export this media message: {row} because {e}")
+        mms_errors += 1
         continue
 
-logging.info('finished mms extract')
+logging.info(f'Finished media export. Messages exported: {mms_counter} Errors: {mms_errors}')
 
 # update the total count
-smses.setAttribute("count", str(counter))
+smses.setAttribute("count", str(sms_counter + mms_counter))
 
 # xml_str = root.toprettyxml(indent="\t")
 with open("sms-backup-restore.xml", "w") as f:
@@ -316,8 +313,10 @@ with open("sms-backup-restore.xml", "w") as f:
 conn.commit()
 cursor.close()
 
-#run_cmd("rm -rf bits")
-rmtree('bits', ignore_errors = True)
+rmtree('bits', ignore_errors=True)
 logging.info("Complete.")
 logging.info("Created: sms-backup-restore.xml")
 logging.info("Now install SMS Backup & Restore and choose this file to restore")
+if int(sms_errors + mms_errors) > 0:
+
+    logging.error(f"WARNING: {sms_errors + mms_errors} messages were skipped! I.e. Not all messages were exported successfully. See output above for the messages that were skipped")
