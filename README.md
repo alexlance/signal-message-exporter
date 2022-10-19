@@ -11,7 +11,8 @@ https://buymeacoffee.com/alexlance
 
 ## Caveats
 
- * Only tested on Docker, Linux and for Android
+ * Tested on Docker, Linux and for Android
+ * Also tested on macos, if you get Error 137, you may need to bump up memory and swap in docker's settings
 
 
 ## Instructions
