@@ -306,9 +306,8 @@ logging.info(f'Finished media export. Messages exported: {mms_counter} Errors: {
 # update the total count
 smses.setAttribute("count", str(sms_counter + mms_counter))
 
-# xml_str = root.toprettyxml(indent="\t")
 with open("sms-backup-restore.xml", "w") as f:
-    f.write(root.toxml(encoding="utf-8", standalone="yes").decode())
+    root.writexml(f, encoding="utf-8", standalone="yes")
 
 conn.commit()
 cursor.close()
