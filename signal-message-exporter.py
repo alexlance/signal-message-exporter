@@ -33,14 +33,14 @@ def print_num_signal():
 
 
 def print_num_mms():
-    q = "select count(*) as tally from mms where msg_box in (20, 87, 23)"
+    q = "select count(*) as tally from mms where type in (20, 87, 23)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total num MMS messages: {tally}")
 
 
 def print_num_signal_mms():
-    q = "select count(*) as tally from mms where msg_box in (10485780, 10485783)"
+    q = "select count(*) as tally from mms where type in (10485780, 10485783)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total number Signal media messages: {tally}")
@@ -63,13 +63,13 @@ def get_groups():
     for g in cursor.fetchall():
         g = dict(g)
         if g['members']:
-            for member_recipient_id in g['members'].split(','):
+            for recipient_id in g['members'].split(','):
                 if g['recipient_id'] not in groups_by_id:
                     groups_by_id[g['recipient_id']] = []
                 try:
-                    groups_by_id[g['recipient_id']].append(ADDRESSES[int(member_recipient_id)])
+                    groups_by_id[g['recipient_id']].append(ADDRESSES[int(recipient_id)])
                 except KeyError:
-                    logging.info(f"Unable to find a contact on your phone with ID: {member_recipient_id}")
+                    logging.info(f"Unable to find a contact on your phone with ID: {recipient_id}")
     return groups_by_id
 
 
@@ -78,24 +78,27 @@ def xml_create_sms(root, row):
     sms.setAttribute('protocol', '0')
     sms.setAttribute('subject', 'null')
     sms.setAttribute('date', str(row['date_sent']))
-    sms.setAttribute('service_center', row['service_center'])
+    sms.setAttribute('service_center', row.get('service_center', ''))
     sms.setAttribute('toa', 'null')
     sms.setAttribute('sc_toa', 'null')
     sms.setAttribute('read', '1')
     sms.setAttribute('status', '-1')
 
     try:
-        phone = ADDRESSES[row["address"]]['phone']
-        name = ADDRESSES[row["address"]]['name']
+        phone = ADDRESSES[row["recipient_id"]]['phone']
+        name = ADDRESSES[row["recipient_id"]]['name']
     except KeyError:
         try:
-            phone = GROUPS[row["address"]][0]['phone']
-            name = GROUPS[row["address"]][0]['name']
+            phone = GROUPS[row["recipient_id"]][0]['phone']
+            name = GROUPS[row["recipient_id"]][0]['name']
         except (KeyError, IndexError):
-            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, sms looks like: {row}')
+            logging.error(f'Could not find contact in the recipient table with ID: {row["recipient_id"]}, sms looks like: {row}')
 
-    sms.setAttribute('address', phone)
-    sms.setAttribute('contact_name ', name)
+    try:
+        sms.setAttribute('address', phone)
+        sms.setAttribute('contact_name ', name)
+    except UnboundLocalError:
+        logging.error(f'Could not find contact in the recipient table, sms looks like: {row}')
 
     try:
         t = TYPES[int(row['type'])]
@@ -108,11 +111,11 @@ def xml_create_sms(root, row):
 
 def xml_create_mms(root, row, parts, addrs):
     mms = root.createElement('mms')
-    mms.setAttribute('date', str(row["date"]))
+    mms.setAttribute('date', str(row["date_sent"]))
     mms.setAttribute('ct_t', "application/vnd.wap.multipart.related")
 
     try:
-        t = TYPES[int(row['msg_box'])]
+        t = TYPES[int(row['type'])]
     except KeyError:
         t = 1  # default to received
     mms.setAttribute('msg_box', str(t))
@@ -121,14 +124,14 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('read_status', '1')
 
     try:
-        phone = ADDRESSES[row["address"]]['phone']
-        name = ADDRESSES[row["address"]]['name']
+        phone = ADDRESSES[row["recipient_id"]]['phone']
+        name = ADDRESSES[row["recipient_id"]]['name']
     except KeyError:
         try:
-            phone = GROUPS[row["address"]][0]['phone']
-            name = GROUPS[row["address"]][0]['name']
+            phone = GROUPS[row["recipient_id"]][0]['phone']
+            name = GROUPS[row["recipient_id"]][0]['name']
         except (KeyError, IndexError):
-            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, mms looks like: {row}')
+            logging.error(f'Could not find contact in the recipient table with ID: {row["recipient_id"]}, mms looks like: {row}')
 
     mms.setAttribute('address', phone)
     mms.setAttribute('contact_name ', name)
@@ -277,7 +280,7 @@ for row in cursor.fetchall():
 logging.info(f'Finished text message export. Messages exported: {sms_counter} Errors: {sms_errors}')
 logging.info('Starting MMS and Signal media message export')
 
-cursor.execute('select * from mms order by date')
+cursor.execute('select * from mms order by date_sent')
 for row in cursor.fetchall():
     mms_counter += 1
     row = dict(row)
@@ -289,10 +292,10 @@ for row in cursor.fetchall():
         parts.append(dict(part))
 
     addrs = []
-    if row['address'] in GROUPS:
-        addrs = GROUPS[row['address']]
-    elif row['address'] in ADDRESSES:
-        addrs.append(ADDRESSES[row['address']])
+    if row['recipient_id'] in GROUPS:
+        addrs = GROUPS[row['recipient_id']]
+    elif row['recipient_id'] in ADDRESSES:
+        addrs.append(ADDRESSES[row['recipient_id']])
 
     try:
         smses.appendChild(xml_create_mms(root, row, parts, addrs))
