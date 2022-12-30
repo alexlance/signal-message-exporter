@@ -41,6 +41,15 @@ make run
 6. Check to see if all your messages imported into Android ok. If not, create a PR which fixes the problem ;)
 
 
+## Windows instructions
+
+I haven't tested this on Windows, but user @jbaker6953 has supplied some Windows instructions in
+https://github.com/alexlance/signal-message-exporter/issues/10
+
+and there's a reddit comment here that goes into it:
+https://old.reddit.com/r/signal/comments/y7d3gj/having_trouble_with_smsmms_export_the_devs_want/iutmwr7/
+
+
 ## Thoughts
 * Feel free to shout out with any issues problems in github issues
 * Make sure to go and give signalbackup-tools some kudos as they do most of the heavy lifting
