@@ -107,23 +107,22 @@ def xml_create_sms(root, row):
 
 
 def xml_create_mms(root, row, parts, addrs):
-
-    if 'recipient_id' in row:
-        receiver = row['recipient_id']
-    elif 'address' in row:
-        receiver = row['address']
-    else:
-        logging.error(f'No message receiver detected in mms: {row}')
-        raise Exception(f'No message receiver detected in mms: {row}')
-
     mms = root.createElement('mms')
     mms.setAttribute('date', str(row["date"]))
     mms.setAttribute('ct_t', "application/vnd.wap.multipart.related")
 
+    # default to received
     try:
-        t = TYPES[int(row['msg_box'])]
+        t = TYPES[int(row.get('msg_box', 20))]
     except KeyError:
-        t = 1  # default to received
+        t = 1
+
+    # The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
+    if t == 1:
+        type_address = 151
+    else:
+        type_address = 137
+
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
     mms.setAttribute('sub', 'null')
@@ -134,21 +133,14 @@ def xml_create_mms(root, row, parts, addrs):
     tilda = ""
     space = ""
 
-    try:
-        phone = ADDRESSES[receiver]['phone']
-        name = ADDRESSES[receiver]['name']
-    except KeyError:
-        try:
-            if receiver in GROUPS and len(GROUPS[receiver]):
-                for p in GROUPS[receiver]:
-                    if "phone" in p and p["phone"]:
-                        phone += tilda + str(p["phone"])
-                        tilda = "~"
-                    if "name" in p and p["name"]:
-                        name += space + str(p["name"])
-                        space = ", "
-        except (KeyError, IndexError) as e:
-            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, mms looks like: {row}, error: {e}')
+    if addrs and len(addrs):
+        for p in addrs:
+            if "phone" in p and p["phone"]:
+                phone += tilda + str(p["phone"])
+                tilda = "~"
+            if "name" in p and p["name"]:
+                name += space + str(p["name"])
+                space = ", "
 
     mms.setAttribute('address', phone)
     mms.setAttribute('contact_name ', name)
@@ -161,12 +153,6 @@ def xml_create_mms(root, row, parts, addrs):
     for part in parts:
         mms.appendChild(xml_create_mms_part(root, part))
 
-    # The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
-    if t == 1:
-        type_address = 151
-    else:
-        type_address = 137
-    type_address = 137  # todo
     for addr in addrs:
         mms.appendChild(xml_create_mms_addr(root, addr, type_address))
     return mms
@@ -308,11 +294,19 @@ for row in cursor.fetchall():
     for part in cursor2.fetchall():
         parts.append(dict(part))
 
+    if 'recipient_id' in row:
+        receiver = row['recipient_id']
+    elif 'address' in row:
+        receiver = row['address']
+    else:
+        logging.error(f'Error, skipping message: No message receiver detected in mms: {row}')
+        continue
+
     addrs = []
-    if row['address'] in GROUPS:
-        addrs = GROUPS[row['address']]
-    elif row['address'] in ADDRESSES:
-        addrs.append(ADDRESSES[row['address']])
+    if receiver in GROUPS:
+        addrs = GROUPS[receiver]
+    elif receiver in ADDRESSES:
+        addrs.append(ADDRESSES[receiver])
 
     try:
         smses.appendChild(xml_create_mms(root, row, parts, addrs))
