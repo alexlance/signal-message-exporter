@@ -107,6 +107,15 @@ def xml_create_sms(root, row):
 
 
 def xml_create_mms(root, row, parts, addrs):
+
+    if 'recipient_id' in row:
+        receiver = row['recipient_id']
+    elif 'address' in row:
+        receiver = row['address']
+    else:
+        logging.error(f'No message receiver detected in mms: {row}')
+        raise Exception(f'No message receiver detected in mms: {row}')
+
     mms = root.createElement('mms')
     mms.setAttribute('date', str(row["date"]))
     mms.setAttribute('ct_t', "application/vnd.wap.multipart.related")
@@ -120,15 +129,26 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('sub', 'null')
     mms.setAttribute('read_status', '1')
 
+    phone = ""
+    name = ""
+    tilda = ""
+    space = ""
+
     try:
-        phone = ADDRESSES[row["address"]]['phone']
-        name = ADDRESSES[row["address"]]['name']
+        phone = ADDRESSES[receiver]['phone']
+        name = ADDRESSES[receiver]['name']
     except KeyError:
         try:
-            phone = GROUPS[row["address"]][0]['phone']
-            name = GROUPS[row["address"]][0]['name']
-        except (KeyError, IndexError):
-            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, mms looks like: {row}')
+            if receiver in GROUPS and len(GROUPS[receiver]):
+                for p in GROUPS[receiver]:
+                    if "phone" in p and p["phone"]:
+                        phone += tilda + str(p["phone"])
+                        tilda = "~"
+                    if "name" in p and p["name"]:
+                        name += space + str(p["name"])
+                        space = ", "
+        except (KeyError, IndexError) as e:
+            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, mms looks like: {row}, error: {e}')
 
     mms.setAttribute('address', phone)
     mms.setAttribute('contact_name ', name)
