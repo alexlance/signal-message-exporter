@@ -125,7 +125,7 @@ def xml_create_mms(root, row, parts, addrs):
 
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
-    mms.setAttribute('sub', 'null')
+    mms.setAttribute('sub', row.get('body', ''))
     mms.setAttribute('read_status', '1')
 
     phone = ""
