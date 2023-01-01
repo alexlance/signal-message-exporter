@@ -122,7 +122,8 @@ def xml_create_mms(root, row, parts, addrs):
         t = 1
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
-    mms.setAttribute('sub', str(row.get('body', '')))
+    if row.get('body', '') != '' and row.get('body', '') is not None and row.get('body', '') != 'None':
+        mms.setAttribute('sub', str(row.get('body', '')))
     mms.setAttribute('read_status', '1')
 
     phone = ""
@@ -171,7 +172,9 @@ def xml_create_mms_part(root, row, body=''):
     part.setAttribute("cl", str(row['cl']))
     if 'caption' in row and row['caption']:
         body = row['caption']
-    part.setAttribute("text", str(body))
+
+    if body != '' and body is not None and body != 'None':
+        part.setAttribute("text", str(body))
 
     filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
     try:
@@ -274,7 +277,7 @@ mms_errors = 0
 
 logging.info('Starting SMS and Signal text message export')
 
-cursor.execute('select * from sms order by date_sent')
+cursor.execute('select * from sms order by date_sent desc')
 for row in cursor.fetchall():
     sms_counter += 1
     row = dict(row)
@@ -303,7 +306,7 @@ for row in cursor.fetchall():
 logging.info(f'Finished text message export. Messages exported: {sms_counter} Errors: {sms_errors}')
 logging.info('Starting MMS and Signal media message export')
 
-cursor.execute('select * from mms order by date')
+cursor.execute('select * from mms order by date desc')
 for row in cursor.fetchall():
     mms_counter += 1
     row = dict(row)
