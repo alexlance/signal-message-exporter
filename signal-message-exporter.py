@@ -3,9 +3,10 @@ import sys
 import sqlite3
 import logging
 import argparse
-from xml.dom import minidom
+import xml.dom.minidom
 import base64
-from shutil import which, rmtree
+from shutil import which, rmtree  # noqa
+import html
 
 
 def run_cmd(cmd):
@@ -73,7 +74,7 @@ def get_groups():
     return groups_by_id
 
 
-def xml_create_sms(root, row):
+def xml_create_sms(root, row, addrs):
     sms = root.createElement('sms')
     sms.setAttribute('protocol', '0')
     sms.setAttribute('subject', 'null')
@@ -84,15 +85,19 @@ def xml_create_sms(root, row):
     sms.setAttribute('read', '1')
     sms.setAttribute('status', '-1')
 
-    try:
-        phone = ADDRESSES[row["address"]]['phone']
-        name = ADDRESSES[row["address"]]['name']
-    except KeyError:
-        try:
-            phone = GROUPS[row["address"]][0]['phone']
-            name = GROUPS[row["address"]][0]['name']
-        except (KeyError, IndexError):
-            logging.error(f'Could not find contact in the recipient table with ID: {row["address"]}, sms looks like: {row}')
+    phone = ""
+    name = ""
+    tilda = ""
+    space = ""
+
+    if addrs and len(addrs):
+        for p in addrs:
+            if "phone" in p and p["phone"]:
+                phone += tilda + str(p["phone"])
+                tilda = "~"
+            if "name" in p and p["name"]:
+                name += space + str(p["name"])
+                space = ", "
 
     sms.setAttribute('address', phone)
     sms.setAttribute('contact_name ', name)
@@ -102,7 +107,7 @@ def xml_create_sms(root, row):
     except KeyError:
         t = 1  # default to received
     sms.setAttribute('type', str(t))
-    sms.setAttribute('body', str(row['body']))
+    sms.setAttribute('body', html.escape(str(row.get('body', ''))))
     return sms
 
 
@@ -118,7 +123,7 @@ def xml_create_mms(root, row, parts, addrs):
         t = 1
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
-    mms.setAttribute('sub', row.get('body', ''))
+    mms.setAttribute('sub', html.escape(str(row.get('body', ''))))
     mms.setAttribute('read_status', '1')
 
     phone = ""
@@ -166,7 +171,7 @@ def xml_create_mms_part(root, row, body=''):
     part.setAttribute("cl", str(row['cl']))
     if 'caption' in row and row['caption']:
         body = row['caption']
-    part.setAttribute("text", str(body))
+    part.setAttribute("text", html.escape(str(body)))
 
     filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
     try:
@@ -258,7 +263,7 @@ print_num_signal()
 print_num_mms()
 print_num_signal_mms()
 
-root = minidom.Document()
+root = xml.dom.minidom.Document()
 smses = root.createElement('smses')
 root.appendChild(smses)
 
@@ -274,8 +279,22 @@ for row in cursor.fetchall():
     sms_counter += 1
     row = dict(row)
     logging.debug(f'SMS processing: {row["_id"]}')
+
+    if 'recipient_id' in row:
+        row["receiver"] = row['recipient_id']
+    elif 'address' in row:
+        row["receiver"] = row['address']
+    else:
+        logging.error(f'Error: No message receiver detected in sms: {row}')
+
+    addrs = []
+    if row["receiver"] in GROUPS:
+        addrs = GROUPS[row["receiver"]]
+    elif row["receiver"] in ADDRESSES:
+        addrs.append(ADDRESSES[row["receiver"]])
+
     try:
-        smses.appendChild(xml_create_sms(root, row))
+        smses.appendChild(xml_create_sms(root, row, addrs))
     except Exception as e:
         logging.error(f"Failed to export this text message: {row} because {e}")
         sms_errors += 1
