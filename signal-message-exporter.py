@@ -6,7 +6,6 @@ import argparse
 import xml.dom.minidom
 import base64
 from shutil import which, rmtree  # noqa
-import html
 
 
 def run_cmd(cmd):
@@ -107,7 +106,7 @@ def xml_create_sms(root, row, addrs):
     except KeyError:
         t = 1  # default to received
     sms.setAttribute('type', str(t))
-    sms.setAttribute('body', html.escape(str(row.get('body', ''))))
+    sms.setAttribute('body', str(row.get('body', '')))
     return sms
 
 
@@ -123,7 +122,7 @@ def xml_create_mms(root, row, parts, addrs):
         t = 1
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
-    mms.setAttribute('sub', html.escape(str(row.get('body', ''))))
+    mms.setAttribute('sub', str(row.get('body', '')))
     mms.setAttribute('read_status', '1')
 
     phone = ""
@@ -154,6 +153,7 @@ def xml_create_mms(root, row, parts, addrs):
     for addr in addrs:
         # The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
         # group alex, ben, meg: alex sends message, alex=From, ben and meg=To
+        # msg_box - The type of message, 1 = Received, 2 = Sent, 3 = Draft, 4 = Outbox
         if t == 2 and row["receiver"] == addr["recipient_id"]:
             type_address = 137
         else:
@@ -171,7 +171,7 @@ def xml_create_mms_part(root, row, body=''):
     part.setAttribute("cl", str(row['cl']))
     if 'caption' in row and row['caption']:
         body = row['caption']
-    part.setAttribute("text", html.escape(str(body)))
+    part.setAttribute("text", str(body))
 
     filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
     try:
