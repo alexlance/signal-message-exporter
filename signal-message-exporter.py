@@ -256,6 +256,7 @@ TYPES = {
     10485783:    2,  # me sent
     10485780:    1,  # received
     20:          1,  # received
+    11075607:    1,  # received (?)
 }
 
 ADDRESSES = get_recipients()
@@ -277,18 +278,11 @@ mms_errors = 0
 
 logging.info('Starting SMS and Signal text message export')
 
-cursor.execute('select * from sms order by date_sent desc')
+cursor.execute('select sms.*, thread.thread_recipient_id as receiver from sms left join thread on sms.thread_id = thread._id order by sms.date_sent desc')
 for row in cursor.fetchall():
     sms_counter += 1
     row = dict(row)
     logging.debug(f'SMS processing: {row["_id"]}')
-
-    if 'recipient_id' in row:
-        row["receiver"] = row['recipient_id']
-    elif 'address' in row:
-        row["receiver"] = row['address']
-    else:
-        logging.error(f'Error: No message receiver detected in sms: {row}')
 
     addrs = []
     if row["receiver"] in GROUPS:
@@ -306,7 +300,7 @@ for row in cursor.fetchall():
 logging.info(f'Finished text message export. Messages exported: {sms_counter} Errors: {sms_errors}')
 logging.info('Starting MMS and Signal media message export')
 
-cursor.execute('select * from mms order by date desc')
+cursor.execute('select mms.*, thread.thread_recipient_id as receiver from mms left join thread on mms.thread_id = thread._id order by mms.date desc')
 for row in cursor.fetchall():
     mms_counter += 1
     row = dict(row)
@@ -316,13 +310,6 @@ for row in cursor.fetchall():
     cursor2.execute(f'select * from part where mid = {row["_id"]} order by seq')
     for part in cursor2.fetchall():
         parts.append(dict(part))
-
-    if 'recipient_id' in row:
-        row["receiver"] = row['recipient_id']
-    elif 'address' in row:
-        row["receiver"] = row['address']
-    else:
-        logging.error(f'Error: No message receiver detected in mms: {row}')
 
     addrs = []
     if row["receiver"] in GROUPS:
