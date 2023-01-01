@@ -53,7 +53,7 @@ def get_recipients():
         c = dict(c)
         if 'phone' in c and c['phone']:
             clean_number = c["phone"].replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-            contacts_by_id[c['_id']] = {'phone': clean_number, 'name': c['system_display_name']}
+            contacts_by_id[c['_id']] = {'phone': clean_number, 'name': c['system_display_name'], 'recipient_id': c['_id']}
     return contacts_by_id
 
 
@@ -111,18 +111,11 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('date', str(row["date"]))
     mms.setAttribute('ct_t', "application/vnd.wap.multipart.related")
 
-    # default to received
+    # msg_box - The type of message, 1 = Received, 2 = Sent, 3 = Draft, 4 = Outbox
     try:
         t = TYPES[int(row.get('msg_box', 20))]
     except KeyError:
         t = 1
-
-    # The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
-    if t == 1:
-        type_address = 151
-    else:
-        type_address = 137
-
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
     mms.setAttribute('sub', row.get('body', ''))
@@ -151,21 +144,29 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('sim_slot', '0')
 
     for part in parts:
-        mms.appendChild(xml_create_mms_part(root, part))
+        mms.appendChild(xml_create_mms_part(root, part, row.get('body', '')))
 
     for addr in addrs:
+        # The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
+        # group alex, ben, meg: alex sends message, alex=From, ben and meg=To
+        if t == 2 and row["receiver"] == addr["recipient_id"]:
+            type_address = 137
+        else:
+            type_address = 151
         mms.appendChild(xml_create_mms_addr(root, addr, type_address))
     return mms
 
 
-def xml_create_mms_part(root, row):
+def xml_create_mms_part(root, row, body=''):
     part = root.createElement('part')
     part.setAttribute("seq", str(row['seq']))
     part.setAttribute("ct", str(row['ct']))
     part.setAttribute("name", str(row['name']))
     part.setAttribute("chset", str(row['chset']))
     part.setAttribute("cl", str(row['cl']))
-    part.setAttribute("text", str(row['caption']))
+    if 'caption' in row and row['caption']:
+        body = row['caption']
+    part.setAttribute("text", str(body))
 
     filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
     try:
@@ -295,18 +296,17 @@ for row in cursor.fetchall():
         parts.append(dict(part))
 
     if 'recipient_id' in row:
-        receiver = row['recipient_id']
+        row["receiver"] = row['recipient_id']
     elif 'address' in row:
-        receiver = row['address']
+        row["receiver"] = row['address']
     else:
-        logging.error(f'Error, skipping message: No message receiver detected in mms: {row}')
-        continue
+        logging.error(f'Error: No message receiver detected in mms: {row}')
 
     addrs = []
-    if receiver in GROUPS:
-        addrs = GROUPS[receiver]
-    elif receiver in ADDRESSES:
-        addrs.append(ADDRESSES[receiver])
+    if row["receiver"] in GROUPS:
+        addrs = GROUPS[row["receiver"]]
+    elif row["receiver"] in ADDRESSES:
+        addrs.append(ADDRESSES[row["receiver"]])
 
     try:
         smses.appendChild(xml_create_mms(root, row, parts, addrs))
