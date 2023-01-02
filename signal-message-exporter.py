@@ -8,6 +8,42 @@ import base64
 from shutil import which, rmtree  # noqa
 
 
+# Minidom bug: https://github.com/python/cpython/issues/50002
+# In theory this monkey patches minidom to encode line breaks in attributes,
+# but unfortunately there's a "replace" method not found error when I uncomment it
+# def _write_data(writer, data, isAttrib=False):
+#     "Writes datachars to writer."
+#     if isAttrib:
+#         data = data.replace("\r", "&#xD;").replace("\n", "&#xA;")
+#         data = data.replace("\t", "&#x9;")
+#     writer.write(data)
+# xml.dom.minidom._write_data = _write_data  # noqa
+#
+#
+# def writexml(self, writer, indent="", addindent="", newl=""):
+#     # indent = current indentation
+#     # addindent = indentation to add to higher levels
+#     # newl = newline string
+#     writer.write(indent + "<" + self.tagName)
+#
+#     attrs = self._get_attributes()
+#     a_names = attrs.keys()
+#     # a_names.sort()
+#
+#     for a_name in a_names:
+#         writer.write(" %s=\"" % a_name)
+#         _write_data(writer, attrs[a_name].value, isAttrib=True)
+#         writer.write("\"")
+#     if self.childNodes:
+#         writer.write(">%s" % (newl))
+#         for node in self.childNodes:
+#             node.writexml(writer, indent + addindent, addindent, newl)
+#         writer.write("%s</%s>%s" % (indent, self.tagName, newl))
+#     else:
+#         writer.write("/>%s" % (newl))
+# xml.dom.minidom.Element.writexml = writexml  # noqa
+
+
 def run_cmd(cmd):
     logging.info(f"running command: {cmd}")
     r = os.popen(cmd)
@@ -110,8 +146,10 @@ def xml_create_sms(root, row, addrs):
     return sms
 
 
-def xml_create_mms(root, row, parts, addrs):
+def xml_create_mms(root, row, parts, addrs, sender):
     mms = root.createElement('mms')
+    partselement = root.createElement('parts')
+    addrselement = root.createElement('addrs')
     mms.setAttribute('date', str(row["date"]))
     mms.setAttribute('ct_t', "application/vnd.wap.multipart.related")
 
@@ -122,8 +160,7 @@ def xml_create_mms(root, row, parts, addrs):
         t = 1
     mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
-    if row.get('body', '') != '' and row.get('body', '') is not None and row.get('body', '') != 'None':
-        mms.setAttribute('sub', str(row.get('body', '')))
+    mms.setAttribute('sub', 'null')
     mms.setAttribute('read_status', '1')
 
     phone = ""
@@ -148,33 +185,36 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('m_type', str(row['m_type']))
     mms.setAttribute('sim_slot', '0')
 
-    for part in parts:
-        mms.appendChild(xml_create_mms_part(root, part, row.get('body', '')))
+    if parts or row.get('body', ''):
+        mms.appendChild(partselement)
+        if row.get('body', ''):
+            partselement.appendChild(xml_create_mms_text_part(root, row.get('body', '')))
+        else:
+            for part in parts:
+                partselement.appendChild(xml_create_mms_part(root, part))
+
+    if addrs:
+        mms.appendChild(addrselement)
 
     for addr in addrs:
         # The type of address, 129 = BCC, 130 = CC, 151 = To, 137 = From
         # group alex, ben, meg: alex sends message, alex=From, ben and meg=To
         # msg_box - The type of message, 1 = Received, 2 = Sent, 3 = Draft, 4 = Outbox
-        if t == 2 and row["receiver"] == addr["recipient_id"]:
+        if sender == addr["phone"]:
             type_address = 137
         else:
             type_address = 151
-        mms.appendChild(xml_create_mms_addr(root, addr, type_address))
+        addrselement.appendChild(xml_create_mms_addr(root, addr, type_address))
     return mms
 
 
-def xml_create_mms_part(root, row, body=''):
+def xml_create_mms_part(root, row):
     part = root.createElement('part')
     part.setAttribute("seq", str(row['seq']))
-    part.setAttribute("ct", str(row['ct']))
     part.setAttribute("name", str(row['name']))
     part.setAttribute("chset", str(row['chset']))
     part.setAttribute("cl", str(row['cl']))
-    if 'caption' in row and row['caption']:
-        body = row['caption']
-
-    if body != '' and body is not None and body != 'None':
-        part.setAttribute("text", str(body))
+    part.setAttribute("ct", str(row['ct']))
 
     filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
     try:
@@ -186,6 +226,15 @@ def xml_create_mms_part(root, row, body=''):
         raise
 
     part.setAttribute("data", base64_encoded_file_data)
+    return part
+
+
+def xml_create_mms_text_part(root, body=''):
+    if body:
+        part = root.createElement('part')
+        part.setAttribute("seq", "0")
+        part.setAttribute("ct", "text/plain")
+        part.setAttribute("text", body)
     return part
 
 
@@ -249,6 +298,7 @@ conn = sqlite3.connect(os.path.join("bits", "database.sqlite"))
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 cursor2 = conn.cursor()
+cursor3 = conn.cursor()
 
 TYPES = {
     23:          2,  # me sent
@@ -300,7 +350,7 @@ for row in cursor.fetchall():
 logging.info(f'Finished text message export. Messages exported: {sms_counter} Errors: {sms_errors}')
 logging.info('Starting MMS and Signal media message export')
 
-cursor.execute('select mms.*, thread.thread_recipient_id as receiver from mms left join thread on mms.thread_id = thread._id order by mms.date desc')
+cursor.execute('select mms.*, thread.thread_recipient_id as receiver, recipient.phone as senderphone from mms left join thread on mms.thread_id = thread._id left join recipient on mms.address = recipient._id order by mms.date desc')
 for row in cursor.fetchall():
     mms_counter += 1
     row = dict(row)
@@ -312,13 +362,23 @@ for row in cursor.fetchall():
         parts.append(dict(part))
 
     addrs = []
+    sender = ""
     if row["receiver"] in GROUPS:
         addrs = GROUPS[row["receiver"]]
+        if row["address"] == row["receiver"]:
+            # Not sure if we're going out on a limb by assuming that the only
+            # recipient with a UUID will be the one having the phone number of
+            # the device being backed up.
+            cursor3.execute("select phone from recipient where uuid is not null")
+            for row2 in cursor3.fetchall():
+                sender = row2["phone"]
+        else:
+            sender = row["senderphone"]
     elif row["receiver"] in ADDRESSES:
         addrs.append(ADDRESSES[row["receiver"]])
 
     try:
-        smses.appendChild(xml_create_mms(root, row, parts, addrs))
+        smses.appendChild(xml_create_mms(root, row, parts, addrs, sender))
     except Exception as e:
         logging.error(f"Failed to export this media message: {row} because {e}")
         mms_errors += 1
@@ -330,7 +390,7 @@ logging.info(f'Finished media export. Messages exported: {mms_counter} Errors: {
 smses.setAttribute("count", str(sms_counter + mms_counter))
 
 with open("sms-backup-restore.xml", "w", encoding="utf-8") as f:
-    root.writexml(f, encoding="utf-8", standalone="yes")
+    root.writexml(f, indent="\t", addindent="\t", newl="\n", encoding="utf-8", standalone="yes")
 
 conn.commit()
 cursor.close()
