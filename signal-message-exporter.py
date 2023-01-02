@@ -4,44 +4,57 @@ import sqlite3
 import logging
 import argparse
 import xml.dom.minidom
+from xml.dom import Node  # for monkeypatch
 import base64
 from shutil import which, rmtree  # noqa
 
 
-# Minidom bug: https://github.com/python/cpython/issues/50002
-# In theory this monkey patches minidom to encode line breaks in attributes,
-# but unfortunately there's a "replace" method not found error when I uncomment it
-# def _write_data(writer, data, isAttrib=False):
-#     "Writes datachars to writer."
-#     if isAttrib:
-#         data = data.replace("\r", "&#xD;").replace("\n", "&#xA;")
-#         data = data.replace("\t", "&#x9;")
-#     writer.write(data)
-# xml.dom.minidom._write_data = _write_data  # noqa
-#
-#
-# def writexml(self, writer, indent="", addindent="", newl=""):
-#     # indent = current indentation
-#     # addindent = indentation to add to higher levels
-#     # newl = newline string
-#     writer.write(indent + "<" + self.tagName)
-#
-#     attrs = self._get_attributes()
-#     a_names = attrs.keys()
-#     # a_names.sort()
-#
-#     for a_name in a_names:
-#         writer.write(" %s=\"" % a_name)
-#         _write_data(writer, attrs[a_name].value, isAttrib=True)
-#         writer.write("\"")
-#     if self.childNodes:
-#         writer.write(">%s" % (newl))
-#         for node in self.childNodes:
-#             node.writexml(writer, indent + addindent, addindent, newl)
-#         writer.write("%s</%s>%s" % (indent, self.tagName, newl))
-#     else:
-#         writer.write("/>%s" % (newl))
-# xml.dom.minidom.Element.writexml = writexml  # noqa
+def _write_data(writer, data, isAttrib=False):
+    "Writes datachars to writer."
+    # Patch minidom for unencoded attributes:
+    # https://github.com/python/cpython/issues/50002
+    # The monkey patch included on that bug report is quite old and doesn't work
+    # with today's xml.dom/minidom code. The code below has been updated to be
+    # compatible with the latest xml.dom.minidom codebase.
+    if data:
+        if isAttrib:
+            data = data.replace("\r", "&#xD;").replace("\n", "&#xA;")
+            data = data.replace("\t", "&#x9;")
+        else:  # Otherwise we're overwriting the corrections above
+            data = data.replace("&", "&amp;").replace("<", "&lt;"). \
+                replace("\"", "&quot;").replace(">", "&gt;")
+        writer.write(data)
+xml.dom.minidom._write_data = _write_data  # noqa
+
+
+def writexml(self, writer, indent="", addindent="", newl=""):
+    """Write an XML element to a file-like object
+    Write the element to the writer object that must provide
+    a write method (e.g. a file or StringIO object).
+    """
+    # indent = current indentation
+    # addindent = indentation to add to higher levels
+    # newl = newline string
+    writer.write(indent + "<" + self.tagName)
+    attrs = self._get_attributes()
+
+    for a_name in attrs.keys():
+        writer.write(" %s=\"" % a_name)
+        _write_data(writer, attrs[a_name].value, isAttrib=True)
+        writer.write("\"")
+    if self.childNodes:
+        writer.write(">")
+        if (len(self.childNodes) == 1 and self.childNodes[0].nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE)):
+            self.childNodes[0].writexml(writer, '', '', '')
+        else:
+            writer.write(newl)
+            for node in self.childNodes:
+                node.writexml(writer, indent + addindent, addindent, newl)
+            writer.write(indent)
+        writer.write("</%s>%s" % (self.tagName, newl))
+    else:
+        writer.write("/>%s" % (newl))
+xml.dom.minidom.Element.writexml = writexml  # noqa
 
 
 def run_cmd(cmd):
