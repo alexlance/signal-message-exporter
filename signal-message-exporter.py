@@ -168,7 +168,7 @@ def xml_create_mms(root, row, parts, addrs):
         t = TYPES[int(row.get('type', 20))]
     except KeyError:
         t = 1
-    mms.setAttribute('type', str(t))
+    mms.setAttribute('msg_box', str(t))
     mms.setAttribute('rr', 'null')
     mms.setAttribute('sub', 'null')
     mms.setAttribute('read_status', '1')
