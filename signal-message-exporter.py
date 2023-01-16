@@ -63,6 +63,7 @@ def run_cmd(cmd):
         logging.error(f"command failed: {cmd}")
         sys.exit(rtn)
 
+
 def print_num_sms():
     q = "select count(*) as tally from mms where type in (20, 22, 23, 24, 87, 88) and m_type = 0"
     cursor.execute(q)
@@ -205,7 +206,7 @@ def xml_create_mms(root, row, parts, addrs, sender):
             for part in parts:
                 try:
                     partselement.appendChild(xml_create_mms_part(root, part))
-                except:
+                except Exception:
                     continue
     if addrs:
         mms.appendChild(addrselement)
@@ -264,6 +265,7 @@ def xml_create_vcard_part(root, vcarddata):
         part.setAttribute("data", vcarddata)
     return part
 
+
 def xml_create_mms_addr(root, address, address_type):
     addr = root.createElement('addr')
     addr.setAttribute("address", str(address['phone']))
@@ -280,7 +282,8 @@ def is_tool(name):
 
 def no_nones(row):
     for sNull in row:
-        if row[sNull] is None: row[sNull] = 'null'
+        if row[sNull] is None:
+            row[sNull] = 'null'
     return row
 
 
@@ -429,10 +432,10 @@ for row in cursor.fetchall():
             raise
 
     elif row["type"] in export_types and row["m_type"] == 0 and row["story_type"] == 0:
-        if row["body"] != 'null':
         # No body in SMS means no message. Let's avoid creating empty messages.
         # Some system-generated messages in Signal (such as alerts that a user's
         # number has changed) have a null body.
+        if row["body"] != 'null':
             sms_counter += 1
             try:
                 smses.appendChild(xml_create_sms(root, row, addrs))
