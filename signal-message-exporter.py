@@ -63,30 +63,29 @@ def run_cmd(cmd):
         logging.error(f"command failed: {cmd}")
         sys.exit(rtn)
 
-
 def print_num_sms():
-    q = "select count(*) as tally from sms where type in (20, 87, 23)"
+    q = "select count(*) as tally from mms where type in (20, 22, 23, 24, 87, 88) and m_type = 0"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total num SMS messages: {tally}")
 
 
 def print_num_signal():
-    q = "select count(*) as tally from sms where type in (10485780, 10485783)"
+    q = "select count(*) as tally from mms where type in (10485780, 10485783, 10485784) and m_type = 0"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total number Signal messages: {tally}")
 
 
 def print_num_mms():
-    q = "select count(*) as tally from mms where type in (20, 87, 23)"
+    q = "select count(*) as tally from mms where type in (20, 22, 23, 24, 87, 88) and m_type in (128, 130, 132)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total num MMS messages: {tally}")
 
 
 def print_num_signal_mms():
-    q = "select count(*) as tally from mms where type in (10485780, 10485783)"
+    q = "select count(*) as tally from mms where type in (10485780, 10485783, 10485784) and m_type in (128, 130, 132)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total number Signal media messages: {tally}")
@@ -195,12 +194,12 @@ def xml_create_mms(root, row, parts, addrs):
     mms.setAttribute('m_type', str(row['m_type']))
     mms.setAttribute('sim_slot', '0')
 
-    if parts or row['body']:
+    if parts or (row['body'] and row['body'] != 'null'):
         mms.appendChild(partselement)
-        if row['body'] and str(row['body']).startswith('BEGIN:VCARD'):
+        if str(row['body']).startswith('BEGIN:VCARD'):
             vcardencoding = base64.b64encode(row['body'].encode()).decode()
             partselement.appendChild(xml_create_vcard_part(root, vcardencoding))
-        elif row['body'] != "":
+        elif row['body'] and row['body'] != 'null':
             partselement.appendChild(xml_create_mms_text_part(root, str(row['body'])))
         if parts:
             for part in parts:
@@ -240,7 +239,7 @@ def xml_create_mms_part(root, row):
             b = base64.b64encode(f.read())
             base64_encoded_file_data = str(b.decode())
     except FileNotFoundError:
-        logging.error(f'File not found for media message: {filename} for part: {row}')
+        logging.error(f'File {filename} not found for part: {row["_id"]}')
         raise
 
     part.setAttribute("data", base64_encoded_file_data)
@@ -248,12 +247,11 @@ def xml_create_mms_part(root, row):
 
 
 def xml_create_mms_text_part(root, body):
-    if body:
-        part = root.createElement('part')
-        part.setAttribute("seq", "0")
-        part.setAttribute("ct", "text/plain")
-        part.setAttribute("chset", "UTF-8")
-        part.setAttribute("text", body)
+    part = root.createElement('part')
+    part.setAttribute("seq", "0")
+    part.setAttribute("ct", "text/plain")
+    part.setAttribute("chset", "UTF-8")
+    part.setAttribute("text", body)
     return part
 
 
@@ -334,14 +332,41 @@ conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 cursor2 = conn.cursor()
 
+# types:
+# 1 = System notification of incoming Signal voice call
+# 2 = System notification of outgoing Signal voice call
+# 3 = System notification of missed incoming Signal voice call
+# 7 = System notification of contact's profile name change
+# 14 = System notification that a contact's Signal number has changed
+# 20 = Received SMS or MMS
+# 22 = Pending outgoing message that hasn't sent yet
+# 23 = Sent SMS or MMS message
+# 24 = SMS message that failed to send
+# 87 = Sent SMS or MMS message
+# 88 = Sent MMS message that failed to send
+# 8214 = System notification that contact's safety number was marked 'unverified'
+# 16406 = System notification that contact's safety number was marked 'verified'
+# 2097156 = System notification that a contact is now on Signal
+# 2097684 = System notification of safety number change
+# 8388628 = MMS received from Signal system (not from network). Includes media messages sent to self.
+# 10485780 = Received Signal message
+# 10485783 = Sent Signal message
+# 10485784 = Signal message that failed to send
+
 TYPES = {
+    22:          2,  # me sent
     23:          2,  # me sent
+    24:          2,  # me sent
     87:          2,  # me sent
+    88:          2,  # me sent
     10485783:    2,  # me sent
+    10485784:    2,  # me sent
     10485780:    1,  # received
     20:          1,  # received
     11075607:    1,  # received (?)
 }
+
+export_types = (20, 22, 23, 24, 87, 88, 8388628, 10485780, 10485783, 10485784)
 
 ADDRESSES = get_recipients()
 GROUPS = get_groups()
@@ -359,64 +384,68 @@ sms_counter = 0
 sms_errors = 0
 mms_counter = 0
 mms_errors = 0
+signal_message_count = 0
 
-logging.info('Starting SMS and Signal text message export')
+logging.info('Starting message export')
 
-cursor.execute("""select sms._id, sms.date_sent, sms.type, sms.body, thread.recipient_id as receiver
-                  from sms left join thread on sms.thread_id = thread._id order by sms.date_sent desc""")
-for row in cursor.fetchall():
-    row = no_nones(dict(row))
-    logging.debug(f'SMS processing: {row["_id"]}')
-
-    addrs = []
-    if row["receiver"] in GROUPS:
-        addrs = GROUPS[row["receiver"]]
-    elif row["receiver"] in ADDRESSES:
-        addrs.append(ADDRESSES[row["receiver"]])
-
-    if row["body"] != 'null':
-    # No body in SMS means no message. Let's avoid creating empty messages.
-    # Some system-generated messages in Signal (such as alerts that a user's
-    # number has changed) have a null body.
-        sms_counter += 1
-        try:
-            smses.appendChild(xml_create_sms(root, row, addrs))
-        except Exception as e:
-            logging.error(f"Failed to export this text message: {row} because {e}")
-            sms_errors += 1
-            continue
-
-logging.info(f'Finished text message export. Messages exported: {sms_counter} Errors: {sms_errors}')
-logging.info('Starting MMS and Signal media message export')
-
-cursor.execute("""select mms._id, mms.date_sent, mms.m_size, mms.m_type, mms.body, mms.recipient_id, mms.type,
+cursor.execute("""select mms._id, mms.date_sent, mms.m_size, mms.m_type, mms.body, mms.recipient_id, mms.type, mms.story_type,
                   thread.recipient_id as receiver from mms left join thread on mms.thread_id = thread._id order by mms.date_sent desc""")
 for row in cursor.fetchall():
-    mms_counter += 1
     row = no_nones(dict(row))
-    logging.debug(f'MMS processing: {row["_id"]}')
-
-    parts = []
-    cursor2.execute(f"""select part._id, part.seq, part.name, part.chset, part.cl,
-                        part.ct, part.unique_id from part where mid = {row['_id']} order by seq""")
-    for part in cursor2.fetchall():
-        parts.append(no_nones(dict(part)))
+    logging.debug(f'Processing: {row["_id"]}')
 
     addrs = []
-    sender = ""
     if row["receiver"] in GROUPS:
         addrs = GROUPS[row["receiver"]]
     elif row["receiver"] in ADDRESSES:
         addrs.append(ADDRESSES[row["receiver"]])
 
-    try:
-        smses.appendChild(xml_create_mms(root, row, parts, addrs))
-    except Exception as e:
-        logging.error(f"Failed to export this media message: {row} because {e}")
-        mms_errors += 1
-        continue
+    # m_types: 128 = MMS sent from user, 132 = MMS received by user,
+    # 130 = MMS received by user but not downloaded from server,
+    # 0 = SMS sent or received, null = ?
+    if row["type"] in export_types and row["m_type"] in (128, 130, 132) and row["story_type"] == 0:
+        mms_counter += 1
+        parts = []
+        cursor2.execute(f"""select _id, seq, name, chset, cl, ct, unique_id from part
+                            where mid = {row['_id']} order by seq""")
+        for part in cursor2.fetchall():
+            parts.append(no_nones(dict(part)))
 
-logging.info(f'Finished media export. Messages exported: {mms_counter} Errors: {mms_errors}')
+        try:
+            mmstest = smses.appendChild(xml_create_mms(root, row, parts, addrs))
+
+            if mmstest.getElementsByTagName('parts') and mmstest.getElementsByTagName('parts')[0].childNodes == []:
+                # If we get here the parts element has no child nodes. Delete the whole mms.
+                # This is rare, but can happen with a blank MMS message with an attachment and
+                # when the attachment can't be found.
+                mmstest.parentNode.removeChild(mmstest)
+                mms_errors += 1
+                mms_counter -= 1
+
+        except Exception as e:
+            logging.error(f"Failed to export this message: {row} because {e}")
+            mms_errors += 1
+            mms_counter -= 1
+            raise
+            
+    elif row["type"] in export_types and row["m_type"] == 0 and row["story_type"] == 0:
+        if row["body"] != 'null':
+        # No body in SMS means no message. Let's avoid creating empty messages.
+        # Some system-generated messages in Signal (such as alerts that a user's
+        # number has changed) have a null body.
+            sms_counter += 1
+            try:
+                smses.appendChild(xml_create_sms(root, row, addrs))
+            except Exception as e:
+                logging.error(f"Failed to export this text message: {row} because {e}")
+                sms_errors += 1
+                sms_counter -= 1
+                raise
+    else:
+        signal_message_count += 1
+        logging.debug(f'Message ID {row["_id"]} skipped because it is an internal Signal message')
+logging.info("Finished export.")
+logging.info(f"""Messages exported: {sms_counter + mms_counter} Errors: {sms_errors + mms_errors} Skipped internal Signal messages: {signal_message_count}""")
 
 # update the total count
 smses.setAttribute("count", str(sms_counter + mms_counter))
