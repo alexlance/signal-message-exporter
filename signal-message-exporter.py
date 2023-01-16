@@ -156,7 +156,7 @@ def xml_create_sms(root, row, addrs):
     return sms
 
 
-def xml_create_mms(root, row, parts, addrs, sender):
+def xml_create_mms(root, row, parts, addrs):
     mms = root.createElement('mms')
     partselement = root.createElement('parts')
     addrselement = root.createElement('addrs')
