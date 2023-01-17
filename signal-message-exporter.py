@@ -333,7 +333,6 @@ conn = sqlite3.connect(os.path.join("bits", "database.sqlite"))
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 cursor2 = conn.cursor()
-cursor3 = conn.cursor()
 
 # types:
 # 1 = System notification of incoming Signal voice call
