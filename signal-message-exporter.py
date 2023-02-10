@@ -65,28 +65,28 @@ def run_cmd(cmd):
 
 
 def print_num_sms():
-    q = "select count(*) as tally from mms where type in (20, 22, 23, 24, 87, 88) and m_type = 0"
+    q = "select count(*) as tally from message where type in (20, 22, 23, 24, 87, 88) and m_type = 0"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total num SMS messages: {tally}")
 
 
 def print_num_signal():
-    q = "select count(*) as tally from mms where type in (10485780, 10485783, 10485784) and m_type = 0"
+    q = "select count(*) as tally from message where type in (10485780, 10485783, 10485784) and m_type = 0"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total number Signal messages: {tally}")
 
 
 def print_num_mms():
-    q = "select count(*) as tally from mms where type in (20, 22, 23, 24, 87, 88) and m_type in (128, 130, 132)"
+    q = "select count(*) as tally from message where type in (20, 22, 23, 24, 87, 88) and m_type in (128, 130, 132)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total num MMS messages: {tally}")
 
 
 def print_num_signal_mms():
-    q = "select count(*) as tally from mms where type in (10485780, 10485783, 10485784) and m_type in (128, 130, 132)"
+    q = "select count(*) as tally from message where type in (10485780, 10485783, 10485784) and m_type in (128, 130, 132)"
     cursor.execute(q)
     (tally,) = cursor.fetchone()
     logging.info(f"Total number Signal media messages: {tally}")
@@ -104,12 +104,12 @@ def get_recipients():
 
 
 def get_groups():
-    cursor.execute("select group_id, recipient_id, members from groups")
+    cursor.execute("select group_id, recipient_id, former_v1_members from groups")
     groups_by_id = {}
     for g in cursor.fetchall():
         g = dict(g)
-        if g['members']:
-            for recipient_id in g['members'].split(','):
+        if g['former_v1_members']:
+            for recipient_id in g['former_v1_members'].split(','):
                 if g['recipient_id'] not in groups_by_id:
                     groups_by_id[g['recipient_id']] = []
                 try:
@@ -390,8 +390,8 @@ signal_message_count = 0
 
 logging.info('Starting message export')
 
-cursor.execute("""select mms._id, mms.date_sent, mms.m_size, mms.m_type, mms.body, mms.recipient_id, mms.type, mms.story_type,
-                  thread.recipient_id as receiver from mms left join thread on mms.thread_id = thread._id order by mms.date_sent desc""")
+cursor.execute("""select message._id, message.date_sent, message.m_size, message.m_type, message.body, message.recipient_id, message.type, message.story_type,
+                  thread.recipient_id as receiver from message left join thread on message.thread_id = thread._id order by message.date_sent desc""")
 for row in cursor.fetchall():
     row = no_nones(dict(row))
     logging.debug(f'Processing: {row["_id"]}')
