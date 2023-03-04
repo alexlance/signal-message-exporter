@@ -104,18 +104,18 @@ def get_recipients():
 
 
 def get_groups():
-    cursor.execute("select group_id, recipient_id, former_v1_members from groups")
+    cursor.execute("select group_id, recipient_id from groups")
     groups_by_id = {}
     for g in cursor.fetchall():
         g = dict(g)
-        if g['former_v1_members']:
-            for recipient_id in g['former_v1_members'].split(','):
-                if g['recipient_id'] not in groups_by_id:
-                    groups_by_id[g['recipient_id']] = []
-                try:
-                    groups_by_id[g['recipient_id']].append(ADDRESSES[int(recipient_id)])
-                except KeyError:
-                    logging.info(f"Unable to find a contact on your phone with ID: {recipient_id}")
+        cursor.execute(f"SELECT recipient_id FROM group_membership WHERE group_membership.group_id IS \"{g['group_id']}\"")
+        for member in cursor.fetchall():
+            if g['recipient_id'] not in groups_by_id:
+                groups_by_id[g['recipient_id']] = []
+            try:
+                groups_by_id[g['recipient_id']].append(ADDRESSES[int(member['recipient_id'])])
+            except KeyError:
+                logging.info(f"Unable to find a contact on your phone with ID: {member['recipient_id']}")
     return groups_by_id
 
 
