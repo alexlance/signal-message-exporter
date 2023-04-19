@@ -430,7 +430,7 @@ for row in cursor.fetchall():
             mms_counter -= 1
             raise
 
-    elif row["type"] in export_types and row["m_type"] == 0 and row["story_type"] == 0:
+    elif row["type"] in export_types and (row["m_type"] == 0 or row["m_type"] == 'null') and row["story_type"] == 0:
         # No body in SMS means no message. Let's avoid creating empty messages.
         # Some system-generated messages in Signal (such as alerts that a user's
         # number has changed) have a null body.
