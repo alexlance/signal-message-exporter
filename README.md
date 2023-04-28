@@ -6,8 +6,6 @@ XML file that can be used with SyncTech's *SMS Backup & Restore* Android app.
 This project will export all SMS + MMS + Signal messages, so that all the
 messages can be re-imported into the Android messaging store.
 
-https://buymeacoffee.com/alexlance
-
 
 ## Caveats
 
