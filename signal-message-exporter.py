@@ -390,8 +390,8 @@ signal_message_count = 0
 
 logging.info('Starting message export')
 
-cursor.execute("""select message._id, message.date_sent, message.m_size, message.m_type, message.body, message.recipient_id, message.type, message.story_type,
-                  thread.recipient_id as receiver from message left join thread on message.thread_id = thread._id order by message.date_sent desc""")
+cursor.execute("""select message._id, message.date_sent, message.m_size, message.m_type, message.body, message.to_recipient_id as recipient_id, message.type, message.story_type, thread.recipient_id as receiver from message left join thread on message.thread_id = thread._id order by message.date_sent desc""")
+
 for row in cursor.fetchall():
     row = no_nones(dict(row))
     logging.debug(f'Processing: {row["_id"]}')
