@@ -93,7 +93,7 @@ def print_num_signal_mms():
 
 
 def get_recipients():
-    cursor.execute("select phone, system_display_name, _id, pni from recipient")
+    cursor.execute("select e164 as phone, system_joined_name as system_display_name, _id, pni from recipient")
     contacts_by_id = {}
     for c in cursor.fetchall():
         c = dict(c)
@@ -206,7 +206,8 @@ def xml_create_mms(root, row, parts, addrs):
             for part in parts:
                 try:
                     partselement.appendChild(xml_create_mms_part(root, part))
-                except Exception:
+                except Exception as e:
+                    logging.error(f"Bad: {e} for {part}")
                     continue
     if addrs:
         mms.appendChild(addrselement)
@@ -229,11 +230,13 @@ def xml_create_mms_part(root, row):
     part = root.createElement('part')
     part.setAttribute("seq", str(row['seq']))
     part.setAttribute("name", str(row['name']))
-    part.setAttribute("chset", str(row['chset']))
-    part.setAttribute("cl", str(row['cl']))
+    part.setAttribute("chset", str(row.get('chset', '')))  # gone?
+    part.setAttribute("cl", str(row.get('cl', '')))        # gone?
     part.setAttribute("ct", str(row['ct']))
 
-    filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
+    # seem to have lost the unique_id now too
+    # filename = f"bits/Attachment_{row['_id']}_{row['unique_id']}.bin"
+    filename = f"bits/Attachment_{row['_id']}_-1.bin"
     try:
         with open(filename, 'rb') as f:
             b = base64.b64encode(f.read())
@@ -292,7 +295,10 @@ parser = argparse.ArgumentParser(description='Export Signal messages to an XML f
 # parser.add_argument('--mode', '-m', dest='mode', action='store', help="mode should be one sms-only, sms-mms-only, sms-mms-signal")
 parser.add_argument('--verbose', '-v', dest='verbose', action='store_true', help='Make logging more verbose')
 args = parser.parse_args()
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG if args.verbose else logging.INFO)
+if args.verbose:
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
+else:
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
 
 PLATFORM = sys.platform
 
@@ -390,7 +396,9 @@ signal_message_count = 0
 
 logging.info('Starting message export')
 
-cursor.execute("""select message._id, message.date_sent, message.m_size, message.m_type, message.body, message.to_recipient_id as recipient_id, message.type, message.story_type, thread.recipient_id as receiver from message left join thread on message.thread_id = thread._id order by message.date_sent desc""")
+cursor.execute("""select message._id, message.date_sent, message.m_size, message.m_type, message.body,
+                  message.to_recipient_id as recipient_id, message.type, message.story_type, thread.recipient_id as receiver
+                  from message left join thread on message.thread_id = thread._id order by message.date_sent desc""")
 
 for row in cursor.fetchall():
     row = no_nones(dict(row))
@@ -408,21 +416,25 @@ for row in cursor.fetchall():
     if row["type"] in export_types and row["m_type"] in (128, 130, 132) and row["story_type"] == 0:
         mms_counter += 1
         parts = []
-        cursor2.execute(f"""select _id, seq, name, chset, cl, ct, unique_id from part
-                            where mid = {row['_id']} order by seq""")
+        # they dropped the "part" table...
+        # cursor2.execute(f"""select _id, seq, name, chset, cl, ct, unique_id from part
+        #                    where mid = {row['_id']} order by seq""")
+        cursor2.execute(f"""select _id, display_order as seq, file_name as name, content_type as ct
+                            from attachment where message_id = {row['_id']} order by display_order""")
         for part in cursor2.fetchall():
             parts.append(no_nones(dict(part)))
 
         try:
             mmstest = smses.appendChild(xml_create_mms(root, row, parts, addrs))
 
-            if mmstest.getElementsByTagName('parts') and mmstest.getElementsByTagName('parts')[0].childNodes == []:
-                # If we get here the parts element has no child nodes. Delete the whole mms.
-                # This is rare, but can happen with a blank MMS message with an attachment and
-                # when the attachment can't be found.
-                mmstest.parentNode.removeChild(mmstest)
-                mms_errors += 1
-                mms_counter -= 1
+            # if mmstest.getElementsByTagName('parts') and mmstest.getElementsByTagName('parts')[0].childNodes == []:
+            #     # If we get here the parts element has no child nodes. Delete the whole mms.
+            #     # This is rare, but can happen with a blank MMS message with an attachment and
+            #     # when the attachment can't be found.
+            #     logging.error(f"Failed to export this mms: {row} because can't find parts: {len(parts)}")
+            #     mmstest.parentNode.removeChild(mmstest)
+            #     mms_errors += 1
+            #     mms_counter -= 1
 
         except Exception as e:
             logging.error(f"Failed to export this message: {row} because {e}")
@@ -447,7 +459,7 @@ for row in cursor.fetchall():
         signal_message_count += 1
         logging.debug(f'Message ID {row["_id"]} skipped because it is an internal Signal message')
 logging.info("Finished export.")
-logging.info(f"""Messages exported: {sms_counter + mms_counter} Errors: {sms_errors + mms_errors} Skipped internal Signal messages: {signal_message_count}""")
+logging.info(f"""Messages exported: {sms_counter + mms_counter} SMS Errors: {sms_errors}  MMS Errors: {mms_errors}. Skipped internal Signal messages: {signal_message_count}""")
 
 # update the total count
 smses.setAttribute("count", str(sms_counter + mms_counter))
