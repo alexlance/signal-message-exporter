@@ -9,6 +9,7 @@ messages can be re-imported into the Android messaging store.
 
 ## Caveats
 
+ * Note: This project worked with Signal versions from 2023. Later versions of Signal don't work - they will need the database schema updated in signal-message-exporter.py file. Pull requests accepted!
  * Tested on Docker, Linux and for Android
  * Also tested on macos, if you get Error 137, you may need to bump up memory and swap in docker's settings
 
